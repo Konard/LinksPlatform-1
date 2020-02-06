@@ -1,21 +1,22 @@
 #include <iostream>
 #include <string.h>
 #include "Links/links.hpp"
-
-
+const char exitcmd[] = "exit";
+const char newlink[] = "nl";
+const char numtolink[] = "ntl";
+const char linktonum[] = "ltn";
+const char getlink[] = "gl";
+const char linkcount[] = "lc";
+const char mem[] = "mem";
+const char hlp[] = "help";
 
 int main(int argc, char* argv[]){
     Links links(argv[1]);
     std::cout << "Opened " << argv[1] << std::endl;
-    char exit[] = "exit";
-    char newlink[] = "nl";
-    char getlink[] = "gl";
-    char linkcount[] = "lc";
-    char mem[] = "mem";
-    char hlp[] = "help";
+    
+    char answer[50];
 
     while(1) {
-        char *answer;
         std::cin >> answer;
         if(strncmp(newlink, answer, sizeof(newlink)) == 0) {
             link_t Source = 0, Target = 0;
@@ -45,10 +46,25 @@ int main(int argc, char* argv[]){
         else if(strncmp(linkcount, answer, sizeof(linkcount)) == 0) {
             std::cout << "Link count: " << links.GetLinkCount() << std::endl;
         }
-        else if(strncmp(exit, answer, sizeof(exit)) == 0) {
+        else if(strncmp(numtolink, answer, sizeof(numtolink)) == 0) {
+            int num;
+            std::cin >> num;
+            Link* link = links.NumberToLink(num);
+            std::cout << "Link index: " << links.GetIndexByLink(link) << std::endl;
+        }
+        else if(strncmp(linktonum, answer, sizeof(linktonum)) == 0){
+            link_t index;
+            std::cin >> index;
+            Link* link = links[index];
+            int num = links.LinkToNumber<int>(link);
+            std::cout << "Number: " << num << std::endl;
+        }
+        else if(strncmp(exitcmd, answer, sizeof(exitcmd)) == 0) {
             break;
         }
+        answer[0] = 0;
     }
+
     links.Close();
     return 0;
 }
