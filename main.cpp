@@ -9,7 +9,12 @@ const char getlink[] = "gl";
 const char linkcount[] = "lc";
 const char mem[] = "mem";
 const char hlp[] = "help";
-
+const char del[] = "dl";
+const char delseq[] = "ds";
+const char strtolink[] = "stl";
+const char linktostr[] = "lts";
+const char searchBySrc[] = "sbs";
+const char searchByTrg[] = "sbt";
 int main(int argc, char* argv[]){
     Links links(argv[1]);
     std::cout << "Opened " << argv[1] << std::endl;
@@ -21,7 +26,7 @@ int main(int argc, char* argv[]){
         if(strncmp(newlink, answer, sizeof(newlink)) == 0) {
             link_t Source = 0, Target = 0;
             std::cin >> Source >> Target;
-            Link* link = links.Create(Source, Target);
+            Link* link = links.CreateLink(Source, Target);
             std::cout << "Link Created: (" << Source << "," << Target << ") Index: " << links.GetIndexByLink(link) << std::endl;
         }
         else if(strncmp(hlp, answer, sizeof(hlp)) == 0) {
@@ -42,9 +47,11 @@ int main(int argc, char* argv[]){
             std::cin >> index;
             Link *link = links.GetLinkByIndex(index);
             std::cout << index << ": " << link->Source << " " << link->Target << std::endl;
+            std::cout << "LeftAsSource: " << link->LeftAsSource << " RightAsSource: " << link->LeftAsSource << " SizeAsSource: " << link->SizeAsSource << std::endl;
+            std::cout << "LeftAsTarget: " << link->LeftAsTarget << " RightAsTarget: " << link->LeftAsTarget << " SizeAsSource: " << link->SizeAsTarget << std::endl;
         }
         else if(strncmp(linkcount, answer, sizeof(linkcount)) == 0) {
-            std::cout << "Link count: " << links.GetLinkCount() << std::endl;
+            std::cout << "Link count: " << links.GetAllocatedLinksCount() << std::endl;
         }
         else if(strncmp(numtolink, answer, sizeof(numtolink)) == 0) {
             int num;
@@ -58,6 +65,47 @@ int main(int argc, char* argv[]){
             Link* link = links[index];
             int num = links.LinkToNumber<int>(link);
             std::cout << "Number: " << num << std::endl;
+        }
+        else if(strncmp(del, answer, sizeof(del)) == 0) {
+            link_t index;
+            std::cin >> index;
+            links.Delete(index);
+            std::cout << "Free count: " << links.GetFreeLinksCount() << std::endl;
+        }
+        else if(strncmp(delseq, answer, sizeof(delseq)) == 0) {
+            link_t index;
+            std::cin >> index;
+            links.DeleteSequence(index);
+            std::cout << "Free count: " << links.GetFreeLinksCount() << std::endl;
+        }
+        else if(strncmp(strtolink, answer, sizeof(strtolink)) == 0) {
+            char *str = (char*)malloc(sizeof(char) * 100);
+            std::cin >> str;
+            std::cout << "stroka: " << str << std::endl;
+            Link* link = links.ArrayToSequence(str, strlen(str) + 1);
+            std::cout << "String index: " << links.GetIndexByLink(link) << std::endl;
+        }
+        else if(strncmp(linktostr, answer, sizeof(linktostr)) == 0) {
+            link_t index;
+            std::cin >> index;
+            char *str = nullptr;
+            Link* link = links.GetLinkByIndex(index);
+            str = links.SequenceToArray<char>(link);
+            std::cout << "String:";
+            printf("%s", str);
+            std::cout << std::endl;
+        }
+        else if(strncmp(searchBySrc, answer, sizeof(searchBySrc)) == 0) {
+            link_t source, target;
+            std::cin >> source >> target;
+            Link* link = links.SearchLinkBySource(source, target);
+            std::cout << "Link index: " << links.GetIndexByLink(link) << std::endl; 
+        }
+        else if(strncmp(searchByTrg, answer, sizeof(searchByTrg)) == 0) {
+            link_t source, target;
+            std::cin >> source >> target;
+            Link* link = links.SearchLinkByTarget(source, target);
+            std::cout << "Link index: " << links.GetIndexByLink(link) << std::endl;
         }
         else if(strncmp(exitcmd, answer, sizeof(exitcmd)) == 0) {
             break;
