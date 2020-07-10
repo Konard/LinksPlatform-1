@@ -1,148 +1,491 @@
 #ifndef LINKS_HPP
 #define LINKS_HPP
-#include "link.hpp"
+#include "linkdata.hpp"
+#include "linkindex.hpp"
 #include "linksmemory.hpp"
-#include <stdint.h>
-#include <iostream>
 #include <stack>
 
-
-
+template <typename T>
 class Links
 {
-private:
-    LinksMemory Memory;
-    Link* LinksArray;
-    link_t AllocatedLinks;
-    link_t ReservedLinks;
-    link_t FreeLinks;
-    link_t FirstFreeLink;
-    link_t FirstAsSource;
-    link_t FirstAsTarget;
-    link_t LastFreeLink;
-    link_t ReservedField;
-    size_t BlockSize = 1024 * 1024 * 16;
-    void Init();
-public:
-	Links(const char* dbname, size_t blocksize = 1024 * 1024 * 16);
-    Link* operator[] (const link_t index);
-	void Create();
-	void Create(link_t target);
-	void Create(link_t source, link_t target);
-	Link* CreateLink();
-	Link* CreateLink(link_t target);
-	Link* CreateLink(link_t source, link_t target);
-	void Delete(link_t index);
-	void Delete(Link* link);
-    void DeleteSequence(link_t index);
-    void DeleteSequence(Link* link);
-    void UpdateLink(Link* link, link_t source, link_t target);
-    void UpdateLink(link_t linkindex, link_t source, link_t target);
-	void Close();
-	size_t GetAllocatedLinksCount();
-    size_t GetReservedLinksCount();
-    size_t GetFreeLinksCount();
-	Link* GetLinkByIndex(link_t index);
-	link_t GetIndexByLink(Link* link);
-	size_t GetMemoryMapSize();
-	size_t GetMemoryUse();
-    link_t BFactorBySource(Link* node);
-    link_t BFactorByTarget(Link* node);
-    void FixSizeBySource(Link* node);
-    void FixSizeByTarget(Link* node);
-    Link* LeftRotateBySource(Link* node);
-    Link* RightRotateBySource(Link* node);
-    Link* LeftRotateByTarget(Link* node);
-    Link* RightRotateByTarget(Link* node);
-    Link* BalanceBySource(Link* node);
-    Link* BalanceByTarget(Link* node);
-    Link* InsertLinkBySource(Link* node);
-    Link* InsertLinkByTarget(Link* node);
-    Link* SearchLinkBySource(link_t Source, link_t Target);
-    Link* SearchLinkByTarget(link_t Source, link_t Target);
- 	template<typename T>
-	Link* NumberToLink(T num);
-    template<typename T>
-    T LinkToNumber(Link* link);
-    template<typename T>
-    Link* ArrayToSequence(T *array, size_t size);
-    template<typename T>
-    T* SequenceToArray(Link* link);
-    template<typename T>
-    T* SequenceToArray(link_t index);
+    private:
+        LinksMemory DataMemory;
+        LinksMemory IndexMemory;
+        LinkData<T>* LinksDataArray;
+        LinkIndex<T>* LinksIndexArray;
+        T AllocatedLinks;
+        T ReservedLinks;
+        T FreeLinks;
+        T FirstFreeLink;
+        T LastFreeLink;
+        size_t BlockSize;
+        void LeftRotateBySourceTree(T pNode);
+        void RightRotateBySourceTree(T qNode);
+        void LeftRotateByTargetTree(T pNode);
+        void RightRotateByTargetTree(T qNode);
+        void MaintainBySourceTree(T node, bool flag);
+        void MaintainByTargetTree(T node, bool flag);
+        void InsertLinkToSourceTree(T node);
+        void InsertLinkToTargetTree(T node);
+        void DeleteLinkFromSourceTree(T node);
+        void DeleteLinkFromTargetTree(T node);
+    public:
+        Links(const char* dataFile, const char* indexFile, size_t blocksize = 1024 * 1024 * 16);
+        T CreateLink(T source, T target);
+        LinkData<T> GetLinkData(T link);
+        LinkIndex<T> GetLinkIndex(T link);
+        void UpdateLink(T linkindex, T source, T target);
+        void Delete(T index);
+        T SearchLinkBySource(T Source, T Target);
+        T SearchLinkByTarget(T Source, T Target);
+        T GetAllocatedLinksCount();
+        T GetReservedLinksCount();
+        T GetFreeLinksCount();
+        void Close();
 };
 
+template <typename T>
+Links<T>::Links(const char* dataFile, const char* indexFile, size_t blocksize) {
+    LinksDataArray = (LinkData<T>*)DataMemory.Map(dataFile, blocksize);
+    LinksIndexArray = (LinkIndex<T>*)IndexMemory.Map(indexFile, blocksize*4);
+    // MetaData loads from 0 link
+    AllocatedLinks = LinksIndexArray[0].RootAsSource; //Количество используемых связей
+    ReservedLinks = LinksIndexArray[0].LeftAsSource; //Количество выделенных связей
+    FreeLinks = LinksIndexArray[0].RightAsSource; // Количество неиспользуемых/удаленных связей
+    FirstFreeLink = LinksIndexArray[0].SizeAsSource; //Индекс первой удаленной связи
+    LastFreeLink = LinksIndexArray[0].RootAsTarget; //Индекс последней удаленной связи
 
-template<typename T>
-Link* Links::NumberToLink(T num) {
-	Link* link = this->CreateLink(0, 0);
-	T ExpOfTwo = 1;
-	int SecondIter = 0;
-	for(int i = 0; i < sizeof(T)*8; i++) {
-		if(ExpOfTwo & num) {
-			link->Target = i + 1;
-			SecondIter = i + 1;
-			ExpOfTwo = ExpOfTwo << 1;
-			break;
-		}
-		ExpOfTwo = ExpOfTwo << 1;
-	}
-	for(int i = SecondIter; i < sizeof(T)*8; i++){
-		if(ExpOfTwo & num) {
-			link = this->CreateLink(GetIndexByLink(link), i + 1);
-		}
-		ExpOfTwo = ExpOfTwo << 1;
-	}
-	return link;
+    ReservedLinks = this->DataMemory.MapSize / sizeof(LinkData<T>);
+    if(AllocatedLinks == 0) {
+        AllocatedLinks = 1;
+    }
+}
+
+
+
+template <typename T>
+T Links<T>::CreateLink(T source, T target) {
+    T index;
+    if(FreeLinks > 0) {
+        index = LastFreeLink;
+        LastFreeLink = LinksDataArray[LastFreeLink].Source;
+        FreeLinks--;
+    }
+    else {
+        index = AllocatedLinks;
+        AllocatedLinks++;
+    }
+    LinksDataArray[index].Source = source;
+    LinksDataArray[index].Target = target;
+    LinksIndexArray[index].RootAsSource = 0;
+    LinksIndexArray[index].LeftAsSource = 0;
+    LinksIndexArray[index].RightAsSource = 0;
+    LinksIndexArray[index].SizeAsSource = 1;
+    LinksIndexArray[index].RootAsTarget = 0;
+    LinksIndexArray[index].LeftAsTarget = 0;
+    LinksIndexArray[index].RightAsTarget = 0;
+    LinksIndexArray[index].SizeAsTarget = 1;
+    //InsertLinkToSourceTree(link);
+    //InsertLinkToTargetTree(link);
+    return index;
 }
 
 template <typename T>
-T Links::LinkToNumber(Link* link) {
-    T num = 0;
-    for(int i = 0; i < 64; i++) {
-        num ^= 1 << (link->Target - 1);
-        if(link->Source != 0) {
-            link = this->GetLinkByIndex(link->Source);
+LinkData<T> Links<T>::GetLinkData(T link) {
+    return LinksDataArray[link];
+}
+
+template <typename T>
+LinkIndex<T> Links<T>::GetLinkIndex(T link) {
+    return LinksIndexArray[link];
+}
+
+
+template <typename T>
+void Links<T>::UpdateLink (T link, T source, T target ) {
+    LinksDataArray[link].Source = source;
+    LinksDataArray[link].Target = target;
+}
+
+
+template <typename T>
+void Links<T>::Delete(T index) {
+    if(FreeLinks) {
+        FreeLinks++;
+        LinksDataArray[LastFreeLink].Target = index;
+        LinksDataArray[index].Source = LastFreeLink;
+        LastFreeLink = index;
+    }
+    else {
+        FreeLinks++;
+        FirstFreeLink = index;
+        LastFreeLink = index;
+    }
+}
+
+
+
+
+
+/* Here should be code of search methods  */
+
+template <typename T>
+void Links<T>::LeftRotateBySourceTree(T pNode) {
+    LinkIndex<T> *pNodePtr = &LinksIndexArray[pNode];
+    LinkIndex<T> *qNodePtr = &LinksIndexArray[pNodePtr->RightAsSource];
+    pNodePtr->RightAsSource = qNodePtr->LeftAsSource;
+    qNodePtr->LeftAsSource = pNode;
+    qNodePtr->SizeAsSource = pNodePtr->SizeAsSource;
+    pNodePtr->SizeAsSource = LinksIndexArray[pNodePtr->LeftAsSource].SizeAsSource + LinksIndexArray[pNodePtr->RightAsSource].SizeAsSource + 1;
+    LinkIndex<T> temp = *pNodePtr;
+    *pNodePtr = *qNodePtr;
+    *qNodePtr = temp;
+}
+
+template <typename T>
+void Links<T>::RightRotateBySourceTree(T qNode) {
+    LinkIndex<T> *qNodePtr = &LinksIndexArray[qNode];
+    LinkIndex<T> *pNodePtr = &LinksIndexArray[qNodePtr->LeftAsSource];
+    qNodePtr->LeftAsSource = pNodePtr->RightAsSource;
+    pNodePtr->RightAsSource = qNode;
+    pNodePtr->SizeAsSource = qNodePtr->SizeAsSource;
+    qNodePtr->SizeAsSource = LinksIndexArray[qNodePtr->LeftAsSource].SizeAsSource + LinksIndexArray[pNodePtr->RightAsSource].SizeAsSource + 1;
+    LinkIndex<T> temp = *qNodePtr;
+    *qNodePtr = *pNodePtr;
+    *pNodePtr = temp;
+}
+
+template <typename T>
+void Links<T>::LeftRotateByTargetTree(T pNode) {
+    LinkIndex<T> *pNodePtr = &LinksIndexArray[pNode];
+    LinkIndex<T> *qNodePtr = &LinksIndexArray[pNodePtr->RightAsTarget];
+    pNodePtr->RightAsTarget = qNodePtr->LeftAsTarget;
+    qNodePtr->LeftAsTarget = pNode;
+    qNodePtr->SizeAsTarget = pNodePtr->SizeAsTarget;
+    pNodePtr->SizeAsTarget = LinksIndexArray[pNodePtr->LeftAsTarget].SizeAsTarget + LinksIndexArray[pNodePtr->RightAsTarget].SizeAsTarget + 1;
+    LinkIndex<T> temp = *pNodePtr;
+    *pNodePtr = *qNodePtr;
+    *qNodePtr = temp;
+}
+
+template <typename T>
+void Links<T>::RightRotateByTargetTree(T qNode) {
+    LinkIndex<T> *qNodePtr = &LinksIndexArray[qNode];
+    LinkIndex<T> *pNodePtr = &LinksIndexArray[qNodePtr->LeftAsTarget];
+    qNodePtr->LeftAsTarget = pNodePtr->RightAsTarget;
+    pNodePtr->RightAsTarget = qNode;
+    pNodePtr->SizeAsTarget = qNodePtr->SizeAsTarget;
+    qNodePtr->SizeAsTarget = LinksIndexArray[qNodePtr->LeftAsTarget].SizeAsTarget + LinksIndexArray[pNodePtr->RightAsTarget].SizeAsTarget + 1;
+    LinkIndex<T> temp = *qNodePtr;
+    *qNodePtr = *pNodePtr;
+    *pNodePtr = temp;
+}
+
+template <typename T>
+void Links<T>::MaintainBySourceTree(T node, bool flag) {
+    LinkIndex<T>* nodePtr = &LinksIndexArray[node];
+    LinkIndex<T>* nodeLeftPtr = &LinksIndexArray[nodePtr->LeftAsSource];
+    LinkIndex<T>* nodeRightPtr = &LinksIndexArray[nodePtr->RightAsSource];
+    if(flag) {
+        if(nodeLeftPtr->SizeAsSource < LinksIndexArray[nodeRightPtr->LeftAsSource].SizeAsSource) {
+            //case 1
+            RightRotateBySourceTree(nodePtr->RightAsSource);
+            LeftRotateBySourceTree(node);
+        }
+        else if(nodeLeftPtr->SizeAsSource < LinksIndexArray[nodeRightPtr->RightAsSource].SizeAsSource) {
+            //case 2
+            LeftRotateBySourceTree(node);
         }
         else {
-            return num;
+            return;
         }
     }
-    return num;
-}
-
-template <typename T>
-Link* Links::ArrayToSequence ( T* array, size_t size) {
-    Link* rootLink = CreateLink(0, 0);
-    Link* link = NumberToLink(array[0]);
-    rootLink->Target = GetIndexByLink(link);
-    for(int i = 1; i < size; i++) {
-        link = NumberToLink(array[i]);
-        rootLink = CreateLink(GetIndexByLink(rootLink), GetIndexByLink(link));
-    }
-    return rootLink;
-}
-
-template <typename T>
-T* Links::SequenceToArray(Link* link) {
-    std::stack <T> seqStack;
-    while(1) {
-        seqStack.push(LinkToNumber<T>(GetLinkByIndex(link->Target)));
-        if(link->Source == 0) {
-            break;
+    else {
+        if(nodeRightPtr->SizeAsSource < LinksIndexArray[nodeLeftPtr->RightAsSource].SizeAsSource) {
+            //case 1'
+            LeftRotateBySourceTree(nodePtr->LeftAsSource);
+            RightRotateBySourceTree(node);
+        }
+        else if(nodeRightPtr->SizeAsSource < LinksIndexArray[nodeLeftPtr->LeftAsSource].SizeAsSource) {
+            RightRotateBySourceTree(node);
         }
         else {
-            link = GetLinkByIndex(link->Source);
+            return;
         }
     }
-    auto size = seqStack.size();
-    T* array = (T*)malloc(sizeof(T) * size);
-    for(int i = 0; i < size; i++) {
-            array[i] = seqStack.top();
-            seqStack.pop();
-    }
-    return array;
+    MaintainBySourceTree(nodePtr->LeftAsSource, false);
+    MaintainBySourceTree(nodePtr->RightAsSource, true);
+    MaintainBySourceTree(node, true);
+    MaintainBySourceTree(node, false);
 }
+
+template <typename T>
+void Links<T>::MaintainByTargetTree(T node, bool flag) {
+    LinkIndex<T>* nodePtr = &LinksIndexArray[node];
+    LinkIndex<T>* nodeLeftPtr = &LinksIndexArray[nodePtr->LeftAsTarget];
+    LinkIndex<T>* nodeRightPtr = &LinksIndexArray[nodePtr->RightAsTarget];
+    if(flag) {
+        if(nodeLeftPtr->SizeAsTarget < LinksIndexArray[nodeRightPtr->LeftAsTarget].SizeAsTarget) {
+            //case 1
+            RightRotateByTargetTree(nodePtr->RightAsTarget);
+            LeftRotateByTargetTree(node);
+        }
+        else if(nodeLeftPtr->SizeAsTarget < LinksIndexArray[nodeRightPtr->RightAsTarget].SizeAsTarget) {
+            //case 2
+            LeftRotateByTargetTree(node);
+        }
+        else {
+            return;
+        }
+    }
+    else {
+        if(nodeRightPtr->SizeAsTarget < LinksIndexArray[nodeLeftPtr->RightAsTarget].SizeAsTarget) {
+            //case 1'
+            LeftRotateByTargetTree(nodePtr->LeftAsTarget);
+            RightRotateByTargetTree(node);
+        }
+        else if(nodeRightPtr->SizeAsTarget < LinksIndexArray[nodeLeftPtr->LeftAsTarget].SizeAsTarget) {
+            RightRotateByTargetTree(node);
+        }
+        else {
+            return;
+        }
+    }
+    MaintainByTargetTree(nodePtr->LeftAsTarget, false);
+    MaintainByTargetTree(nodePtr->RightAsTarget, true);
+    MaintainByTargetTree(node, true);
+    MaintainByTargetTree(node, false);
+}
+
+template <typename T>
+void Links<T>::InsertLinkToSourceTree(T node) {
+    T source = LinksDataArray[node];
+    T target = LinksDataArray[node];
+    LinkIndex<T>* sourceIndexPtr = &LinksIndexArray[source];
+    LinkIndex<T>* targetIndexPtr = &LinksIndexArray[target];
+    if(!sourceIndexPtr->RootAsSource) {
+        T root = sourceIndexPtr->RootAsSource;
+        if(LinksDataArray[root].Target > target) {
+            if(LinksIndexArray[root].LeftAsSource != 0) {
+                LinksIndexArray[root].SizeAsSource++;
+                T currentLink = LinksIndexArray[root].LeftAsSource;
+                std::stack<T> nodes;
+                while(1) {
+                    LinksIndexArray[currentLink].SizeAsSource++;
+                    if(LinksDataArray[currentLink].Target > target){
+                        if(LinksIndexArray[currentLink].LeftAsSource != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].LeftAsSource;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].LeftAsSource = node;
+                            break;
+                        }
+                    }
+                    else {
+                        if(LinksIndexArray[currentLink].RightAsSource != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].RightAsSource;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].RightAsSource = node;
+                            break;
+                        }
+                    }
+                }
+                while(nodes.size() != 1) {
+                    T node = nodes.top();
+                    nodes.pop();
+                    MaintainBySourceTree(nodes.top(), LinksDataArray[node].Target >= LinksDataArray[nodes.top()].Target);
+                }
+            }
+            else {
+                LinksIndexArray[root].LeftAsSource = node;
+                LinksIndexArray[root].SizeAsSource++;
+                MaintainBySourceTree(root, LinksDataArray[node].Target >= target);
+            }
+        }
+        else {
+            if(LinksIndexArray[root].RightAsSource != 0) {
+                LinksIndexArray[root].SizeAsSource++;
+                T currentLink = LinksIndexArray[root].RightAsSource;
+                std::stack<T> nodes;
+                while(1) {
+                    LinksIndexArray[currentLink].SizeAsSource++;
+                    if(LinksDataArray[currentLink].Target > target){
+                        if(LinksIndexArray[currentLink].LeftAsSource != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].LeftAsSource;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].LeftAsSource = node;
+                            break;
+                        }
+                    }
+                    else {
+                        if(LinksIndexArray[currentLink].RightAsSource != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].RightAsSource;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].RightAsSource = node;
+                            break;
+                        }
+                    }
+                }
+                while(nodes.size() != 1) {
+                    T node = nodes.top();
+                    nodes.pop();
+                    MaintainBySourceTree(nodes.top(), LinksDataArray[node].Target >= LinksDataArray[nodes.top()].Target);
+                }
+            }
+            else {
+                LinksIndexArray[root].RightAsSource = node;
+                LinksIndexArray[root].SizeAsSource++;
+                MaintainBySourceTree(root, LinksDataArray[node].Target >= target);
+            }
+        }
+    }
+    else {
+        sourceIndexPtr->RootAsSource = node;
+        sourceIndexPtr->SizeAsSource = 1;
+    }
+}
+
+template <typename T>
+void Links<T>::InsertLinkToTargetTree(T node) {
+    T source = LinksDataArray[node];
+    T target = LinksDataArray[node];
+    LinkIndex<T>* sourceIndexPtr = &LinksIndexArray[source];
+    LinkIndex<T>* targetIndexPtr = &LinksIndexArray[target];
+    if(!targetIndexPtr->RootAsTarget) {
+        T root = targetIndexPtr->RootAsTarget;
+        if(LinksDataArray[root].Source > source) {
+            if(LinksIndexArray[root].LeftAsTarget != 0) {
+                LinksIndexArray[root].SizeAsTarget++;
+                T currentLink = LinksIndexArray[root].LeftAsTarget;
+                std::stack<T> nodes;
+                while(1) {
+                    LinksIndexArray[currentLink].SizeAsTarget++;
+                    if(LinksDataArray[currentLink].Source > source){
+                        if(LinksIndexArray[currentLink].LeftAsTarget != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].LeftAsTarget;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].LeftAsTarget = node;
+                            break;
+                        }
+                    }
+                    else {
+                        if(LinksIndexArray[currentLink].RightAsTarget != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].RightAsTarget;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].RightAsTarget = node;
+                            break;
+                        }
+                    }
+                }
+                while(nodes.size() != 1) {
+                    T node = nodes.top();
+                    nodes.pop();
+                    MaintainByTargetTree(nodes.top(), LinksDataArray[node].Source >= LinksDataArray[nodes.top()].Source);
+                }
+            }
+            else {
+                LinksIndexArray[root].LeftAsTarget = node;
+                LinksIndexArray[root].SizeAsTarget++;
+                MaintainByTargetTree(root, LinksDataArray[node].Source >= source);
+            }
+        }
+        else {
+            if(LinksIndexArray[root].RightAsTarget != 0) {
+                LinksIndexArray[root].SizeAsTarget++;
+                T currentLink = LinksIndexArray[root].RightAsTarget;
+                std::stack<T> nodes;
+                while(1) {
+                    LinksIndexArray[currentLink].SizeAsTarget++;
+                    if(LinksDataArray[currentLink].Source > source){
+                        if(LinksIndexArray[currentLink].LeftAsTarget != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].LeftAsTarget;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].LeftAsTarget = node;
+                            break;
+                        }
+                    }
+                    else {
+                        if(LinksIndexArray[currentLink].RightAsTarget != 0) {
+                            nodes.push(currentLink);
+                            currentLink = LinksIndexArray[currentLink].RightAsTarget;
+                        }
+                        else {
+                            nodes.push(currentLink);
+                            LinksIndexArray[currentLink].RightAsTarget = node;
+                            break;
+                        }
+                    }
+                }
+                while(nodes.size() != 1) {
+                    T node = nodes.top();
+                    nodes.pop();
+                    MaintainByTargetTree(nodes.top(), LinksDataArray[node].Source >= LinksDataArray[nodes.top()].Source);
+                }
+            }
+            else {
+                LinksIndexArray[root].RightAsTarget = node;
+                LinksIndexArray[root].SizeAsTarget++;
+                MaintainByTargetTree(root, LinksDataArray[node].Source >= source);
+            }
+        }
+    }
+    else {
+        targetIndexPtr->RootAsTarget = node;
+        targetIndexPtr->SizeAsTarget = 1;
+    }
+}
+
+/*END*/
+
+template <typename T>
+T Links<T>::GetAllocatedLinksCount() {
+    return AllocatedLinks;
+}
+
+template <typename T>
+T Links<T>::GetReservedLinksCount() {
+    return ReservedLinks;
+}
+
+template <typename T>
+T Links<T>::GetFreeLinksCount() {
+    return FreeLinks;
+}
+
+
+template <typename T>
+void Links<T>::Close() {
+    AllocatedLinks = LinksIndexArray[0].RootAsSource = AllocatedLinks; //Количество используемых связей
+    ReservedLinks = LinksIndexArray[0].LeftAsSource = ReservedLinks; //Количество выделенных связей
+    FreeLinks = LinksIndexArray[0].RightAsSource = FreeLinks; // Количество неиспользуемых/удаленных связей
+    FirstFreeLink = LinksIndexArray[0].SizeAsSource = FirstFreeLink; //Индекс первой удаленной связи
+    LastFreeLink = LinksIndexArray[0].RootAsTarget = LastFreeLink; //Индекс последней удаленной связи
+    DataMemory.ResizeFile(AllocatedLinks * sizeof(LinkData<T>));
+    DataMemory.Close();
+    IndexMemory.ResizeFile(AllocatedLinks * sizeof(LinkIndex<T>));
+    IndexMemory.Close();
+}
+
 
 
 #endif // LINKS_HPP
